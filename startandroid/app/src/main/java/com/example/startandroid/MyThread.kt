@@ -1,8 +1,16 @@
 package com.example.startandroid
 
 public class MyThread() : Thread() {
+
     @Volatile
     private var cancellation = 0
+    private var count = 0
+
+    constructor (k: Int) : this() {
+        count = 100 * k
+    }
+
+
 
     fun Cancel() {
         cancellation = 1
@@ -12,10 +20,15 @@ public class MyThread() : Thread() {
 
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_FOREGROUND)
 
-        while (cancellation == 0) {
-            var numbers = intArrayOf(7, 2, -5, 0, 3, 2, 12, -5, 30)
+        while (cancellation == 0 && count != 0) {
+            for (i in 0 until 1000) {
+                for (j in 0 until  1000) {
+                        var numbers = intArrayOf(7, 2, -5, 0, 3, 2, 12, -5, 30)
 
-            bubbleSort(numbers)
+                        bubbleSort(numbers)
+                }
+            }
+            count--
 
 //            ++HowManyTimesArrayWasSorted
         }

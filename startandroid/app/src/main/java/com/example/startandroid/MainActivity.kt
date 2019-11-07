@@ -5,35 +5,79 @@ import android.view.View
 import android.widget.EditText
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import java.nio.charset.Charset
 import android.content.Context
-import android.widget.Toast
-import java.io.*
-import java.nio.charset.StandardCharsets
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 
-import android.app.Activity;
-import android.os.Environment;
-import android.provider.Telephony.Mms.Part.FILENAME
-import android.util.Log;
+import com.github.mikephil.charting.charts.BarChart
+import kotlin.collections.ArrayList
+import kotlin.system.measureTimeMillis
 
 class MainActivity : AppCompatActivity() {
+
+    class CPUInfo {
+        var core: String? = null
+        var TiO: Long = 0
+        var TiI: Long = 0
+        var TiOff: Long = 0
+        var STemp: Long = 0
+        var FTemp: Long = 0
+        var mapsFreq =  mutableMapOf<Long, Long>()
+
+        constructor(core: String?, TiO: Long, TiI: Long, TiOff: Long, STemp: Long, FTemp: Long, mapsFreq: MutableMap<Long, Long>) {
+            this.core = core
+            this.TiO = TiO
+            this.TiI = TiI
+            this.TiOff = TiOff
+            this.STemp = STemp
+            this.FTemp = FTemp
+            this.mapsFreq = mapsFreq.toSortedMap()
+        }
+    }
+
+    private var cpuInfo =  ArrayList<CPUInfo>()
+    private var fileStatistic: OutputStreamWriter? = null
+    private var isHeaderWritten: Boolean = false
+
+    fun makeCSVFilesForConcreteK (launch: Long) {
+
+        var CSV_HEADER = "Core,Time in Online,Time in Idle,Time in Offline,Start Temperature,Finish Temperature"
+        for (freq in cpuInfo [0].mapsFreq.keys) {
+            CSV_HEADER += ',' + freq.toString()
+        }
+        CSV_HEADER += ",Launch Number"
+        var statistics = ""
+        for (cpuState in cpuInfo) {
+            statistics += cpuState.core + ','
+            statistics += cpuState.TiO.toString() + ','
+            statistics += cpuState.TiI.toString() + ','
+            statistics += cpuState.TiOff.toString() + ','
+            statistics += cpuState.STemp.toString() + ','
+            statistics += cpuState.FTemp.toString() + ','
+            for (freq in cpuState.mapsFreq!!.iterator())  {
+                statistics += (freq.value * 10).toString() + ','
+            }
+            statistics += launch.toString()
+            statistics += '\n'
+        }
+
+        if (!isHeaderWritten) {
+            isHeaderWritten = true
+            fileStatistic?.append(CSV_HEADER)
+            fileStatistic?.append('\n')
+        }
+
+        fileStatistic?.append(statistics)
+    }
 
     private var mHelloTextView: TextView? = null
     private var mInternetTextView: TextView? = null
     private var mNameEditText: EditText? = null
+    private var barChartView: BarChart? = null
     private var worker: MyThread? = null
-    private var mCPU0WorkTest: TextView? = null
-    private var listFreqForCPU0First: MutableMap<String?, String?>? = null
-    private var listFreqForCPU0Last: MutableMap<String?, String?>? = null
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,13 +85,15 @@ class MainActivity : AppCompatActivity() {
 
         mHelloTextView = findViewById(R.id.textView) as TextView
         mNameEditText = findViewById(R.id.editText)
-
+        //barChartView = findViewById(R.id.chartConsumptionGraph)
+        fileStatistic = OutputStreamWriter(this.openFileOutput("Table_for_Concrete_K.csv", Context.MODE_PRIVATE))
+       // this.openFileOutput("Table_for_Concrete_K.csv", Context.MODE_PRIVATE).write("".toByteArray())
 
     }
 
     fun onClick(view: View) {
         if (worker == null) {
-            worker = MyThread()
+            worker = MyThread(1)
             worker?.start()
             mHelloTextView!!.setText("work thread");
         } else {
@@ -56,33 +102,33 @@ class MainActivity : AppCompatActivity() {
             worker = null
             mHelloTextView!!.setText("idle")
         }
-        /*if (mNameEditText!!.getText().length == 0){
-
-        } else {
-            mHelloTextView!!.setText("Привет, " + mNameEditText!!.getText())
-        }*/
 
     }
 
-    fun onClickThread() {
-        if (worker == null) {
-            worker = MyThread()
-            worker?.start()
-            mHelloTextView!!.setText("work thread");
-        } else {
-            worker?.Cancel()
-            worker?.join()
-            worker = null
-            mHelloTextView!!.setText("idle")
-        }
+    fun parserCpuIdle (wfi: File, pc: File) : MutableMap<String, Long> { //standalone_pc: File,
+        var listStatistic = mutableMapOf<String, Long>()
+
+        val bufferedReadWFI = BufferedReader(FileReader(wfi))
+        listStatistic?.put("WFI", bufferedReadWFI.readLine().trim().toLong())
+        bufferedReadWFI.close()
+
+//        val bufferedReadStandalonePC = BufferedReader(FileReader(standalone_pc))
+//        listStatistic?.put("Standalone PC", bufferedReadStandalonePC.readLine().trim().toLong())
+//        bufferedReadStandalonePC.close()
+
+        val bufferedReadPC = BufferedReader(FileReader(pc))
+        var tmp =  bufferedReadPC.readLine().trim().toLong()
+        listStatistic?.put("Power Collapse", tmp)
+        bufferedReadPC.close()
+        return listStatistic
     }
 
-    fun parserTimeInState(file: File) : MutableMap<String?, String?>? {
+    fun parserTimeInState (file: File) : MutableMap<Long, Long> {
         /*val input: InputStream = file.inputStream()
         val baos = ByteArrayOutputStream()
         input.use { it.copyTo(baos) }
         val inputAsString = baos.toString()*/
-        var listStatistic = mutableMapOf<String?, String?>()
+        var listStatistic = mutableMapOf<Long, Long>()
         //BufferedReader br = new BufferedReader(new InputStreamReader(openFileInput(FILENAME)));
         val bufferedRead = BufferedReader(FileReader(file))
         var freq: String? = ""
@@ -105,99 +151,150 @@ class MainActivity : AppCompatActivity() {
                     freq = word
                     i++
                 } else {
-                    value = word.toInt()
+                    value = word.toLong()
                     i = 0
                 }
             }*/
-            listStatistic?.put(freq, value)
-            sum += value + "\n"
+            listStatistic.put(freq!!.toLong(), value!!.toLong())
+            //sum += value + "\n"
         }
         bufferedRead.close()
         return listStatistic
     }
 
+    fun parserCpuTemp (temp: File) : Long{
+        return FileReader(temp).readText().trim().toLong()
+    }
+
+    fun <T> diffMap(map1: MutableMap<T, Long>, map2: MutableMap<T, Long>): MutableMap <T, Long> {
+        var diff = mutableMapOf<T, Long>()
+
+        for (elem in map1){
+            diff.put(elem.key, map2.get(elem.key)!! - elem.value)
+        }
+        return diff
+    }
+
+
+
+
+
     fun internetButtonOnClick(view: View) {
-        /*val randomId = Math.abs(Random.nextInt()) % 10 + 1
+        /*val randomId = Math.abs(Random.nextLong()) % 10 + 1
         NetworkService.getInstance()
             .jsonApi
             .getPostWithID(randomId)
             .enqueue(object : retrofit2.Callback<Post> {
                 override fun onResponse(call: Call<Post>, response: Response<Post>) {
                     val post = response.body()!!
-                    mInternetTextView = findViewById(R.id.textView2) as TextView
+                    mLongernetTextView = findViewById(R.id.textView2) as TextView
 
-                    mInternetTextView?.text = ""
-                    mInternetTextView?.append("${post.getId()}\n")
-                    mInternetTextView?.append("${post.getUserId()}\n")
-                    mInternetTextView?.append(post.getTitle() + "\n")
-                    mInternetTextView?.append(post.getBody() + "\n")
+                    mLongernetTextView?.text = ""
+                    mLongernetTextView?.append("${post.getId()}\n")
+                    mLongernetTextView?.append("${post.getUserId()}\n")
+                    mLongernetTextView?.append(post.getTitle() + "\n")
+                    mLongernetTextView?.append(post.getBody() + "\n")
                 }
 
                 override fun onFailure(call: Call<Post>, t: Throwable) {
 
 //                    textView.append("Error occurred while getting request!")
-                    t.printStackTrace()
+                    t.prLongStackTrace()
                 }
             })*/
-        //var root: File = Environment.getExternalStorageDirectory()
-       // var root: File = Environment.getRootDirectory()
-
-        /*val root = File("./../../../../sys/devices/system/cpu/cpu0/cpufreq/stats/time_in_state")
-        mInternetTextView = findViewById(R.id.textView2) as TextView
-        val inputStream: InputStream = root.inputStream()
-        val cpu0string: String?
-        for (line in root.readLines()) {
-            mInternetTextView?.append(line)
-        }*/
-
-        /*val inputString = inputStream.bufferedReader().use { it.readText() }
-        if (mInternetTextView?.getText() == "irishka\n"){
-            mInternetTextView?.append(inputString)
-        } else {
-            mInternetTextView?.setText("irishka\n")
-            mInternetTextView?.append(inputString)
-        }*/
-
-        /*root.listFiles().forEach {
-            mInternetTextView?.append("${it.name}\n")
-        }*/
-        /*val cpu0TimeInState = File("./../../../../sys/devices/system/cpu/cpu0/cpufreq/stats/time_in_state")
-        mInternetTextView = findViewById(R.id.textView2) as TextView
-        val listFreqForCPU0 = parserTimeInState(cpu0TimeInState)
-        var result = ""
-        for (value in listFreqForCPU0!!.iterator()){
-            result = value.key + " " + value.value
-            mInternetTextView?.setText(result)
-        }*/
-        //mInternetTextView?.setText(listFreqForCPU0)
-        //if (mHelloTextView?.getText() == "idle") {
-
-        //}
-        val cpu0TimeInState = File("./../../../../sys/devices/system/cpu/cpu0/cpufreq/stats/time_in_state")
-        var freqFreq: String?
-        var freqValue: String?
-        var freqLine = ""
-        var diff: Int
-        if (worker == null) {
-            mInternetTextView = findViewById(R.id.textView2) as TextView
-            listFreqForCPU0First = parserTimeInState(cpu0TimeInState)
-            worker = MyThread()
-            worker?.start()
-            mHelloTextView!!.setText("work thread");
-        } else {
-            worker?.Cancel()
-            worker?.join()
-            worker = null
-            mHelloTextView!!.setText("idle")
-            mInternetTextView?.setText("")
-            listFreqForCPU0Last = parserTimeInState(cpu0TimeInState)
-            for (freq in listFreqForCPU0Last!!.iterator()){
-                freqFreq = freq?.key
-                diff = freq?.value!!.toInt() - listFreqForCPU0First?.get(freqFreq)!!.toInt()
-                freqValue = diff.toString()
-                freqLine = freqFreq + " " + freqValue + "\n"
-                mInternetTextView?.append(freqLine)
+        for (k in 0 until 2 ) {
+            var arrayTimeInState = mutableMapOf<String, File>()
+            var arrayWFI = mutableMapOf<String, File>()
+            //var arrayStandalonePC = arrayListOf<File>()
+            var arrayPC = mutableMapOf<String, File>()
+            //var arrayTemp = arrayListOf<File>()
+            for (cpuX in arrayListOf("cpu0", "cpu1", "cpu2", "cpu3"/*, "cpu4", "cpu5", "cpu6", "cpu7"*/)) {
+                arrayTimeInState.put(cpuX, File("./../../../../sys/devices/system/cpu/" + cpuX + "/cpufreq/stats/time_in_state"))
+                arrayWFI.put(cpuX, File("./../../../../sys/devices/system/cpu/" + cpuX + "/cpuidle/state0/time"))
+                //arrayStandalonePC.add(File("./../../../../sys/devices/system/cpu/" + cpuX + "/cpuidle/state1/time"))
+                arrayPC.put(cpuX, File("./../../../../sys/devices/system/cpu/" + cpuX + "/cpuidle/state1/time"))
+                //arrayTemp.add()
             }
+
+            mInternetTextView = findViewById(R.id.textView2) as TextView
+
+            var mapTimeInStateStart = mutableMapOf<String, MutableMap<Long, Long>>()
+            for (cpuX in arrayListOf("cpu0", "cpu1", "cpu2", "cpu3"/*, "cpu4", "cpu5", "cpu6", "cpu7"*/)) {
+                mapTimeInStateStart.put(cpuX, parserTimeInState(arrayTimeInState.get(cpuX)!!))
+            }
+
+            var mapIdleStart = mutableMapOf<String, MutableMap<String, Long>>()
+            for (cpuX in arrayListOf("cpu0", "cpu1", "cpu2", "cpu3"/*, "cpu4", "cpu5", "cpu6", "cpu7"*/)) {
+                mapIdleStart.put(cpuX, parserCpuIdle(arrayWFI.get(cpuX)!!, arrayPC.get(cpuX)!!))
+            }
+
+            mHelloTextView!!.setText("work thread")
+
+            val executionTime = measureTimeMillis {
+                worker = MyThread(k + 1)
+                worker?.start()
+                //worker?.wait()
+                worker?.join()
+                worker = null
+                mHelloTextView!!.setText("idle")
+            }
+
+            mInternetTextView?.setText("")
+
+            var mapTimeInStateFinish = mutableMapOf<String, MutableMap<Long, Long>>()
+            for (cpuX in arrayListOf("cpu0", "cpu1", "cpu2", "cpu3"/*, "cpu4", "cpu5", "cpu6", "cpu7"*/)) {
+                mapTimeInStateFinish.put(cpuX, parserTimeInState(arrayTimeInState.get(cpuX)!!))
+            }
+
+            var mapIdleFinish = mutableMapOf<String, MutableMap<String, Long>>()
+            for (cpuX in arrayListOf("cpu0", "cpu1", "cpu2", "cpu3"/*, "cpu4", "cpu5", "cpu6", "cpu7"*/)) {
+                mapIdleFinish.put(cpuX, parserCpuIdle(arrayWFI.get(cpuX)!!, arrayPC.get(cpuX)!!))
+            }
+            cpuInfo.clear()
+
+            var mapSumDiff = mutableMapOf<String, MutableMap<Long, Long>>()
+            var mapSumDiffIdle = mutableMapOf<String, MutableMap<String, Long>>()
+            for (cpuX in arrayListOf("cpu0", "cpu1", "cpu2", "cpu3"/*, "cpu4", "cpu5", "cpu6", "cpu7"*/)) {
+                mapSumDiff.put(cpuX, diffMap(mapTimeInStateStart.get(cpuX)!!, mapTimeInStateFinish.get(cpuX)!!))
+                mapSumDiffIdle.put(cpuX, diffMap(mapIdleStart.get(cpuX)!!, mapIdleFinish.get(cpuX)!!))
+            }
+
+            var mapSumTiO = mutableMapOf<Long, Long>()
+            for (e in mapSumDiff.get("cpu0")!!.keys) {
+                var sum: Long = 0
+                for (cpuX in arrayListOf("cpu0", "cpu1", "cpu2", "cpu3"/*, "cpu4", "cpu5", "cpu6", "cpu7"*/)) {
+                    sum += mapSumDiff.get(cpuX)!!.get(e)!!
+                }
+                mapSumTiO.put(e, sum)
+            }
+
+            var mapSumTiI = mutableMapOf<String, Long>()
+            for (e in mapSumDiffIdle.get("cpu0")!!.keys) {
+                var sum: Long = 0
+                for (cpuX in arrayListOf("cpu0", "cpu1", "cpu2", "cpu3"/*, "cpu4", "cpu5", "cpu6", "cpu7"*/)) {
+                    sum += mapSumDiffIdle.get(cpuX)!!.get(e)!!
+                }
+                mapSumTiI.put(e, sum)
+            }
+
+            for (cpuX in arrayListOf("cpu0", "cpu1", "cpu2", "cpu3"/*, "cpu4", "cpu5", "cpu6", "cpu7"*/, "cpu")) {
+                if (cpuX == "cpu") {
+                        cpuInfo.add(CPUInfo(cpuX, executionTime.toLong(), mapSumTiI.map {it.value}?.sum() / 1000, 0,
+                            0, 0, mapSumTiO))
+                    } else {
+                    cpuInfo.add(CPUInfo(cpuX, diffMap(mapTimeInStateStart.get(cpuX)!!, mapTimeInStateFinish.get(cpuX)!!).map {it.value}?.sum() * 10,
+                        diffMap(mapIdleStart.get(cpuX)!!, mapIdleFinish.get(cpuX)!!).map {it.value}?.sum() / 1000,
+                        executionTime - (diffMap(mapTimeInStateStart.get(cpuX)!!, mapTimeInStateFinish.get(cpuX)!!).map {it.value}?.sum() * 10 +
+                        diffMap(mapIdleStart.get(cpuX)!!, mapIdleFinish.get(cpuX)!!).map {it.value}?.sum() / 1000),
+                        0, 0, diffMap(mapTimeInStateStart.get(cpuX)!!, mapTimeInStateFinish.get(cpuX)!!)))
+                }
+
+            }
+
+            makeCSVFilesForConcreteK(k.toLong())
+            mInternetTextView!!.append("time work: " + executionTime.toString())
+
         }
+        fileStatistic?.close()
     }
 }
